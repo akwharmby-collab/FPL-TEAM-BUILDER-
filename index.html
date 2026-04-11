@@ -10,7 +10,7 @@
   <div class="app">
     <header class="app-header">
       <h1>FPL Team Helper</h1>
-      <p>Best XI, captain, vice-captain, and transfer ideas</p>
+      <p>Best XI, captain, vice-captain, bank, and transfer ideas</p>
     </header>
 
     <section class="card">
@@ -24,7 +24,7 @@
 
         <label>
           Money in Bank (£m)
-          <input type="number" id="bank" step="0.1" min="0" placeholder="e.g. 1.5" />
+          <input type="number" id="bank" step="0.1" min="0" placeholder="Auto-filled from FPL" />
         </label>
 
         <label>
@@ -35,6 +35,11 @@
 
       <button id="analyseBtn">Analyse Team</button>
       <p id="status" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>FPL Summary</h2>
+      <div id="summaryOutput"></div>
     </section>
 
     <section class="card">
@@ -59,10 +64,10 @@
     </section>
 
     <section class="card">
-      <h2>Top 5 Transfer Ideas</h2>
+      <h2>Top Transfer Ideas</h2>
       <div id="transferOutput"></div>
       <p class="small-note">
-        Uses form, minutes, xG/xA-style data and next fixture difficulty.
+        Includes the best single-transfer ideas and the best two-transfer combo ideas.
       </p>
     </section>
   </div>
