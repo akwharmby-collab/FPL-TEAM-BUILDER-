@@ -17,6 +17,7 @@ const VALID_FORMATIONS = [
 
 const analyseBtn = document.getElementById("analyseBtn");
 const statusEl = document.getElementById("status");
+const currentSquadOutput = document.getElementById("currentSquadOutput");
 const bestXiOutput = document.getElementById("bestXiOutput");
 const benchOutput = document.getElementById("benchOutput");
 const captainOutput = document.getElementById("captainOutput");
@@ -68,6 +69,16 @@ async function analyseTeam() {
     const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, targetEventId);
 
     scorePlayers(squad, fixtureMap);
+
+    const sortedSquad = [...squad].sort((a, b) => {
+      const order = { GK: 1, DEF: 2, MID: 3, FWD: 4 };
+      if (order[a.position] !== order[b.position]) {
+        return order[a.position] - order[b.position];
+      }
+      return b.expectedPoints - a.expectedPoints;
+    });
+
+    renderPlayers(currentSquadOutput, sortedSquad);
 
     const bestTeamResult = pickBestStartingXI(squad);
     renderPlayers(bestXiOutput, bestTeamResult.startingXI);
@@ -174,8 +185,8 @@ function validateSquad(squad) {
   if (counts.DEF !== 5) errors.push("Squad must contain 5 defenders.");
   if (counts.MID !== 5) errors.push("Squad must contain 5 midfielders.");
   if (counts.FWD !== 3) errors.push("Squad must contain 3 forwards.");
-
   const teamCounts = {};
+
   squad.forEach(player => {
     teamCounts[player.teamId] = (teamCounts[player.teamId] || 0) + 1;
   });
@@ -201,7 +212,6 @@ function countByPosition(players) {
 
 function buildFixtureMap(fixtures, teams, targetEventId) {
   const map = {};
-
   const gwFixtures = fixtures.filter(f => f.event === targetEventId);
 
   teams.forEach(team => {
@@ -222,7 +232,6 @@ function buildFixtureMap(fixtures, teams, targetEventId) {
     const isHome = match.team_h === team.id;
     const opponentId = isHome ? match.team_a : match.team_h;
     const opponent = teams.find(t => t.id === opponentId);
-
     const difficulty = isHome ? match.team_h_difficulty : match.team_a_difficulty;
 
     map[team.id] = {
@@ -251,8 +260,9 @@ function scorePlayers(squad, fixtureMap) {
     const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
 
     let roleBonus = 0;
+
     if (player.position === "GK") {
-      roleBonus = (player.cleanSheets * 0.20);
+      roleBonus = player.cleanSheets * 0.20;
     } else if (player.position === "DEF") {
       roleBonus = (player.cleanSheets * 0.22) + (player.expectedGoals * 0.30);
     } else if (player.position === "MID") {
@@ -327,9 +337,7 @@ function pickBestStartingXI(squad) {
 
 function pickCaptainAndVice(startingXI) {
   const sorted = [...startingXI].sort((a, b) => {
-    const aCaptainScore = captainScore(a);
-    const bCaptainScore = captainScore(b);
-    return bCaptainScore - aCaptainScore;
+    return captainScore(b) - captainScore(a);
   });
 
   return {
@@ -377,6 +385,7 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, 
       const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
 
       let roleBonus = 0;
+
       if (position === "GK") {
         roleBonus = (p.clean_sheets || 0) * 0.20;
       } else if (position === "DEF") {
@@ -520,6 +529,7 @@ function renderTransfers(ideas) {
 }
 
 function clearOutputs() {
+  currentSquadOutput.innerHTML = "";
   bestXiOutput.innerHTML = "";
   benchOutput.innerHTML = "";
   captainOutput.innerHTML = "";
