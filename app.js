@@ -30,7 +30,7 @@ async function analyseTeam() {
 
   const teamId = document.getElementById("teamId").value.trim();
   const bank = Number(document.getElementById("bank").value || 0);
-  const freeTransfers = Number(document.getElementById("freeTransfers").value || 1);
+  const freeTransfers = Math.min(5, Math.max(0, Number(document.getElementById("freeTransfers").value || 1)));
 
   if (!teamId) {
     setStatus("Please enter your FPL team ID.");
@@ -40,7 +40,10 @@ async function analyseTeam() {
   try {
     setStatus("Loading FPL data...");
 
-    const bootstrap = await fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/");
+    const [bootstrap, fixtures] = await Promise.all([
+      fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/"),
+      fetchJson("https://fantasy.premierleague.com/api/fixtures/")
+    ]);
 
     const entry = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`);
 
@@ -62,7 +65,9 @@ async function analyseTeam() {
       return;
     }
 
-    scorePlayers(squad);
+    const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, targetEventId);
+
+    scorePlayers(squad, fixtureMap);
 
     const bestTeamResult = pickBestStartingXI(squad);
     renderPlayers(bestXiOutput, bestTeamResult.startingXI);
@@ -77,14 +82,16 @@ async function analyseTeam() {
       allPlayers: bootstrap.elements,
       teams: bootstrap.teams,
       bank,
-      freeTransfers
+      freeTransfers,
+      fixtureMap
     });
 
     renderTransfers(transferIdeas);
-    setStatus(`Done. Analysed team ID ${teamId} using Gameweek ${targetEventId}.`);
+
+    setStatus(`Done. Analysed team ID ${teamId} for Gameweek ${targetEventId}.`);
   } catch (error) {
     console.error(error);
-    setStatus("Could not load your team. Check the team ID, then try again. If it still fails, the FPL API is likely being blocked in the browser.");
+    setStatus("Could not load your team. Check the team ID and try again.");
   }
 }
 
@@ -138,9 +145,21 @@ function buildSquad(picks, bootstrap) {
       goals: player.goals_scored || 0,
       assists: player.assists || 0,
       cleanSheets: player.clean_sheets || 0,
+      expectedGoals: Number(player.expected_goals || 0),
+      expectedAssists: Number(player.expected_assists || 0),
+      chanceOfPlaying: getChanceOfPlaying(player),
+      fixtureDifficulty: 3,
+      nextFixtureText: "No fixture found",
       expectedPoints: 0
     };
   });
+}
+
+function getChanceOfPlaying(player) {
+  if (player.chance_of_playing_next_round === null || player.chance_of_playing_next_round === undefined) {
+    return 100;
+  }
+  return Number(player.chance_of_playing_next_round);
 }
 
 function validateSquad(squad) {
@@ -180,20 +199,88 @@ function countByPosition(players) {
   }, { GK: 0, DEF: 0, MID: 0, FWD: 0 });
 }
 
-function scorePlayers(squad) {
+function buildFixtureMap(fixtures, teams, targetEventId) {
+  const map = {};
+
+  const gwFixtures = fixtures.filter(f => f.event === targetEventId);
+
+  teams.forEach(team => {
+    const match = gwFixtures.find(
+      f => f.team_h === team.id || f.team_a === team.id
+    );
+
+    if (!match) {
+      map[team.id] = {
+        difficulty: 3,
+        opponent: "No fixture",
+        homeAway: "",
+        text: "No fixture found"
+      };
+      return;
+    }
+
+    const isHome = match.team_h === team.id;
+    const opponentId = isHome ? match.team_a : match.team_h;
+    const opponent = teams.find(t => t.id === opponentId);
+
+    const difficulty = isHome ? match.team_h_difficulty : match.team_a_difficulty;
+
+    map[team.id] = {
+      difficulty,
+      opponent: opponent ? opponent.name : "Unknown",
+      homeAway: isHome ? "H" : "A",
+      text: `${opponent ? opponent.name : "Unknown"} (${isHome ? "H" : "A"})`
+    };
+  });
+
+  return map;
+}
+
+function scorePlayers(squad, fixtureMap) {
   squad.forEach(player => {
+    const fixture = fixtureMap[player.teamId] || {
+      difficulty: 3,
+      text: "No fixture found"
+    };
+
+    player.fixtureDifficulty = fixture.difficulty;
+    player.nextFixtureText = fixture.text;
+
     const minutesReliability = Math.min(player.minutes / 2700, 1);
-    const attackingScore = (player.goals * 4) + (player.assists * 3);
-    const cleanSheetScore = player.position === "GK" || player.position === "DEF" ? player.cleanSheets * 2 : 0;
+    const availabilityFactor = player.chanceOfPlaying / 100;
+    const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
+
+    let roleBonus = 0;
+    if (player.position === "GK") {
+      roleBonus = (player.cleanSheets * 0.20);
+    } else if (player.position === "DEF") {
+      roleBonus = (player.cleanSheets * 0.22) + (player.expectedGoals * 0.30);
+    } else if (player.position === "MID") {
+      roleBonus = (player.expectedGoals * 1.10) + (player.expectedAssists * 0.90);
+    } else if (player.position === "FWD") {
+      roleBonus = (player.expectedGoals * 1.20) + (player.expectedAssists * 0.70);
+    }
 
     player.expectedPoints =
-      (player.form * 0.35) +
-      (player.pointsPerGame * 0.20) +
-      (minutesReliability * 2.0) +
-      (attackingScore * 0.08) +
-      (cleanSheetScore * 0.05) +
-      (player.ictIndex * 0.03);
+      (
+        (player.form * 0.32) +
+        (player.pointsPerGame * 0.20) +
+        (minutesReliability * 2.2) +
+        (player.ictIndex * 0.035) +
+        roleBonus
+      ) * fixtureMultiplier * availabilityFactor;
   });
+}
+
+function difficultyMultiplier(difficulty) {
+  switch (difficulty) {
+    case 1: return 1.22;
+    case 2: return 1.12;
+    case 3: return 1.00;
+    case 4: return 0.90;
+    case 5: return 0.78;
+    default: return 1.00;
+  }
 }
 
 function pickBestStartingXI(squad) {
@@ -239,7 +326,11 @@ function pickBestStartingXI(squad) {
 }
 
 function pickCaptainAndVice(startingXI) {
-  const sorted = [...startingXI].sort((a, b) => b.expectedPoints - a.expectedPoints);
+  const sorted = [...startingXI].sort((a, b) => {
+    const aCaptainScore = captainScore(a);
+    const bCaptainScore = captainScore(b);
+    return bCaptainScore - aCaptainScore;
+  });
 
   return {
     captain: sorted[0],
@@ -247,7 +338,19 @@ function pickCaptainAndVice(startingXI) {
   };
 }
 
-function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
+function captainScore(player) {
+  let multiplier = 1;
+
+  if (player.position === "MID") multiplier += 0.08;
+  if (player.position === "FWD") multiplier += 0.10;
+  if (player.chanceOfPlaying < 100) multiplier -= 0.15;
+  if (player.fixtureDifficulty <= 2) multiplier += 0.08;
+  if (player.fixtureDifficulty >= 4) multiplier -= 0.08;
+
+  return player.expectedPoints * multiplier;
+}
+
+function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, fixtureMap }) {
   const squadIds = new Set(squad.map(p => p.id));
   const teamCounts = {};
 
@@ -260,14 +363,38 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
     .map(p => {
       const team = teams.find(t => t.id === p.team);
       const position = POSITION_MAP[p.element_type];
+      const fixture = fixtureMap[p.team] || {
+        difficulty: 3,
+        text: "No fixture found"
+      };
+
       const minutesReliability = Math.min((p.minutes || 0) / 2700, 1);
+      const availabilityFactor = (
+        p.chance_of_playing_next_round === null || p.chance_of_playing_next_round === undefined
+          ? 1
+          : Number(p.chance_of_playing_next_round) / 100
+      );
+      const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
+
+      let roleBonus = 0;
+      if (position === "GK") {
+        roleBonus = (p.clean_sheets || 0) * 0.20;
+      } else if (position === "DEF") {
+        roleBonus = ((p.clean_sheets || 0) * 0.22) + (Number(p.expected_goals || 0) * 0.30);
+      } else if (position === "MID") {
+        roleBonus = (Number(p.expected_goals || 0) * 1.10) + (Number(p.expected_assists || 0) * 0.90);
+      } else if (position === "FWD") {
+        roleBonus = (Number(p.expected_goals || 0) * 1.20) + (Number(p.expected_assists || 0) * 0.70);
+      }
+
       const predicted =
-        (Number(p.form || 0) * 0.35) +
-        (Number(p.points_per_game || 0) * 0.20) +
-        (minutesReliability * 2.0) +
-        ((p.goals_scored || 0) * 0.32) +
-        ((p.assists || 0) * 0.24) +
-        ((Number(p.ict_index || 0)) * 0.03);
+        (
+          (Number(p.form || 0) * 0.32) +
+          (Number(p.points_per_game || 0) * 0.20) +
+          (minutesReliability * 2.2) +
+          (Number(p.ict_index || 0) * 0.035) +
+          roleBonus
+        ) * fixtureMultiplier * availabilityFactor;
 
       return {
         id: p.id,
@@ -276,7 +403,9 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
         teamName: team ? team.name : "Unknown",
         position,
         cost: p.now_cost / 10,
-        expectedPoints: predicted
+        expectedPoints: predicted,
+        nextFixtureText: fixture.text,
+        fixtureDifficulty: fixture.difficulty
       };
     })
     .sort((a, b) => b.expectedPoints - a.expectedPoints);
@@ -297,20 +426,25 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
       return true;
     });
 
-    for (const target of samePositionTargets.slice(0, 25)) {
+    for (const target of samePositionTargets.slice(0, 30)) {
       const gain = target.expectedPoints - currentPlayer.expectedPoints;
+      const penalty = freeTransfers >= 1 ? 0 : 4;
+      const netGain = gain - penalty;
 
-      if (gain > 0.5) {
+      if (netGain > 0.3) {
         ideas.push({
           out: currentPlayer,
           in: target,
-          gain
+          gain,
+          netGain
         });
       }
     }
   }
 
-  return ideas.sort((a, b) => b.gain - a.gain).slice(0, 5);
+  return ideas
+    .sort((a, b) => b.netGain - a.netGain)
+    .slice(0, 5);
 }
 
 function renderPlayers(container, players) {
@@ -330,6 +464,9 @@ function renderPlayers(container, players) {
           <div class="player-meta">
             ${player.position} • ${player.teamName} • £${player.cost.toFixed(1)}m
           </div>
+          <div class="player-meta">
+            Next fixture: ${player.nextFixtureText} • Difficulty: ${player.fixtureDifficulty}
+          </div>
         </div>
       `).join("")}
     </div>
@@ -345,18 +482,22 @@ function renderCaptainSection(data) {
   captainOutput.innerHTML = `
     <div class="captain-box">
       <div><strong>Captain:</strong> ${data.captain.name} (${data.captain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">${data.captain.position} • ${data.captain.teamName}</div>
+      <div class="player-meta">
+        ${data.captain.position} • ${data.captain.teamName} • ${data.captain.nextFixtureText}
+      </div>
     </div>
     <div class="captain-box" style="margin-top: 10px;">
       <div><strong>Vice-captain:</strong> ${data.viceCaptain.name} (${data.viceCaptain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">${data.viceCaptain.position} • ${data.viceCaptain.teamName}</div>
+      <div class="player-meta">
+        ${data.viceCaptain.position} • ${data.viceCaptain.teamName} • ${data.viceCaptain.nextFixtureText}
+      </div>
     </div>
   `;
 }
 
 function renderTransfers(ideas) {
   if (!ideas || ideas.length === 0) {
-    transferOutput.innerHTML = `<p class="empty">No strong transfer ideas found from the simple model yet.</p>`;
+    transferOutput.innerHTML = `<p class="empty">No strong transfer ideas found yet.</p>`;
     return;
   }
 
@@ -367,7 +508,10 @@ function renderTransfers(ideas) {
           <div><strong>Out:</strong> ${item.out.name} (${item.out.teamName})</div>
           <div><strong>In:</strong> ${item.in.name} (${item.in.teamName})</div>
           <div class="player-meta">
-            ${item.out.position} • Cost change: £${(item.in.cost - item.out.cost).toFixed(1)}m • Expected gain: ${item.gain.toFixed(2)} pts
+            ${item.out.position} • Cost change: £${(item.in.cost - item.out.cost).toFixed(1)}m
+          </div>
+          <div class="player-meta">
+            In fixture: ${item.in.nextFixtureText} • Gross gain: ${item.gain.toFixed(2)} pts • Net gain: ${item.netGain.toFixed(2)} pts
           </div>
         </div>
       `).join("")}
