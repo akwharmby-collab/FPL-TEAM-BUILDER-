@@ -62,9 +62,12 @@ async function analyseTeam() {
       `https://fantasy.premierleague.com/api/entry/${teamId}/event/${targetEventId}/picks/`
     );
 
-    const bankFromFpl = getBankValue(picksData, history);
+    const bankFromFpl = getBankValue(picksData, history, targetEventId);
+
     if (bankFromFpl !== null) {
       bankInput.value = bankFromFpl.toFixed(1);
+    } else {
+      bankInput.value = "";
     }
 
     const squad = buildSquad(picksData.picks, bootstrap);
@@ -93,7 +96,7 @@ async function analyseTeam() {
       managerName: entry.player_first_name && entry.player_last_name
         ? `${entry.player_first_name} ${entry.player_last_name}`
         : "Manager",
-      bank: bankFromFpl ?? Number(bankInput.value || 0),
+      bank: bankFromFpl,
       freeTransfers: manualFreeTransfers,
       gameweeks: horizonEventIds
     });
@@ -119,7 +122,11 @@ async function analyseTeam() {
 
     renderTransfers(transferIdeas);
 
-    setStatus(`Done. Analysed team ID ${teamId} across GWs ${horizonEventIds.join(", ")}.`);
+    const bankMessage = bankFromFpl === null
+      ? " Bank could not be read automatically, so enter it manually."
+      : ` Bank auto-filled: £${bankFromFpl.toFixed(1)}m.`;
+
+    setStatus(`Done. Analysed team ID ${teamId} across GWs ${horizonEventIds.join(", ")}.${bankMessage}`);
   } catch (error) {
     console.error(error);
     setStatus("Could not load your team. Check the team ID and try again.");
@@ -137,29 +144,35 @@ function getTargetEventId(events) {
     .filter(e => e.finished)
     .sort((a, b) => b.id - a.id)[0];
 
-  if (latestFinished) return latestFinished.id + 1 <= 38 ? latestFinished.id + 1 : latestFinished.id;
+  if (latestFinished) return Math.min(latestFinished.id + 1, 38);
 
   return 1;
 }
 
 function getNextEventIds(events, startEventId, count) {
+  const validIds = new Set(events.map(e => e.id));
   const ids = [];
   for (let i = startEventId; i <= 38 && ids.length < count; i++) {
-    ids.push(i);
+    if (validIds.has(i)) ids.push(i);
   }
   return ids;
 }
 
-function getBankValue(picksData, history) {
+function getBankValue(picksData, history, targetEventId) {
   const picksBank = picksData?.entry_history?.bank;
-  if (typeof picksBank === "number") {
+  if (typeof picksBank === "number" && !Number.isNaN(picksBank)) {
     return picksBank / 10;
   }
 
   const current = history?.current;
-  if (Array.isArray(current) && current.length > 0) {
+  if (Array.isArray(current)) {
+    const matchingGw = current.find(row => row.event === targetEventId);
+    if (matchingGw && typeof matchingGw.bank === "number") {
+      return matchingGw.bank / 10;
+    }
+
     const latest = [...current].sort((a, b) => b.event - a.event)[0];
-    if (typeof latest.bank === "number") {
+    if (latest && typeof latest.bank === "number") {
       return latest.bank / 10;
     }
   }
@@ -613,6 +626,10 @@ function dedupeComboIdeas(ideas) {
 }
 
 function renderSummary(summary) {
+  const bankText = summary.bank === null
+    ? "Unavailable from public data"
+    : `£${summary.bank.toFixed(1)}m`;
+
   summaryOutput.innerHTML = `
     <div class="summary-list">
       <div class="summary-box">
@@ -621,7 +638,7 @@ function renderSummary(summary) {
           <span class="badge">GWs ${summary.gameweeks.join(", ")}</span>
         </div>
         <div class="player-meta">Manager: ${summary.managerName}</div>
-        <div class="player-meta">Bank: £${summary.bank.toFixed(1)}m</div>
+        <div class="player-meta">Bank: ${bankText}</div>
         <div class="player-meta">Free Transfers: ${summary.freeTransfers}</div>
       </div>
     </div>
