@@ -17,7 +17,9 @@ const VALID_FORMATIONS = [
 
 const analyseBtn = document.getElementById("analyseBtn");
 const statusEl = document.getElementById("status");
+const bankInput = document.getElementById("bank");
 const currentSquadOutput = document.getElementById("currentSquadOutput");
+const summaryOutput = document.getElementById("summaryOutput");
 const bestXiOutput = document.getElementById("bestXiOutput");
 const benchOutput = document.getElementById("benchOutput");
 const captainOutput = document.getElementById("captainOutput");
@@ -30,8 +32,7 @@ async function analyseTeam() {
   clearOutputs();
 
   const teamId = document.getElementById("teamId").value.trim();
-  const bank = Number(document.getElementById("bank").value || 0);
-  const freeTransfers = Math.min(5, Math.max(0, Number(document.getElementById("freeTransfers").value || 1)));
+  const manualFreeTransfers = Math.min(5, Math.max(0, Number(document.getElementById("freeTransfers").value || 1)));
 
   if (!teamId) {
     setStatus("Please enter your FPL team ID.");
@@ -58,6 +59,9 @@ async function analyseTeam() {
       `https://fantasy.premierleague.com/api/entry/${teamId}/event/${targetEventId}/picks/`
     );
 
+    const bankFromFpl = Number((picksData?.entry_history?.bank ?? 0) / 10);
+    bankInput.value = bankFromFpl.toFixed(1);
+
     const squad = buildSquad(picksData.picks, bootstrap);
 
     const squadCheck = validateSquad(squad);
@@ -67,7 +71,6 @@ async function analyseTeam() {
     }
 
     const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, targetEventId);
-
     scorePlayers(squad, fixtureMap);
 
     const sortedSquad = [...squad].sort((a, b) => {
@@ -76,6 +79,16 @@ async function analyseTeam() {
         return order[a.position] - order[b.position];
       }
       return b.expectedPoints - a.expectedPoints;
+    });
+
+    renderSummary({
+      teamName: entry.name || "Your Team",
+      managerName: entry.player_first_name && entry.player_last_name
+        ? `${entry.player_first_name} ${entry.player_last_name}`
+        : "Manager",
+      bank: bankFromFpl,
+      freeTransfers: manualFreeTransfers,
+      gameweek: targetEventId
     });
 
     renderPlayers(currentSquadOutput, sortedSquad);
@@ -92,8 +105,8 @@ async function analyseTeam() {
       squad,
       allPlayers: bootstrap.elements,
       teams: bootstrap.teams,
-      bank,
-      freeTransfers,
+      bank: bankFromFpl,
+      freeTransfers: manualFreeTransfers,
       fixtureMap
     });
 
@@ -176,17 +189,15 @@ function getChanceOfPlaying(player) {
 function validateSquad(squad) {
   const errors = [];
 
-  if (squad.length !== 15) {
-    errors.push("Squad must contain 15 players.");
-  }
+  if (squad.length !== 15) errors.push("Squad must contain 15 players.");
 
   const counts = countByPosition(squad);
   if (counts.GK !== 2) errors.push("Squad must contain 2 goalkeepers.");
   if (counts.DEF !== 5) errors.push("Squad must contain 5 defenders.");
   if (counts.MID !== 5) errors.push("Squad must contain 5 midfielders.");
   if (counts.FWD !== 3) errors.push("Squad must contain 3 forwards.");
-  const teamCounts = {};
 
+  const teamCounts = {};
   squad.forEach(player => {
     teamCounts[player.teamId] = (teamCounts[player.teamId] || 0) + 1;
   });
@@ -215,30 +226,36 @@ function buildFixtureMap(fixtures, teams, targetEventId) {
   const gwFixtures = fixtures.filter(f => f.event === targetEventId);
 
   teams.forEach(team => {
-    const match = gwFixtures.find(
+    const matches = gwFixtures.filter(
       f => f.team_h === team.id || f.team_a === team.id
     );
 
-    if (!match) {
+    if (matches.length === 0) {
       map[team.id] = {
         difficulty: 3,
-        opponent: "No fixture",
-        homeAway: "",
         text: "No fixture found"
       };
       return;
     }
 
-    const isHome = match.team_h === team.id;
-    const opponentId = isHome ? match.team_a : match.team_h;
-    const opponent = teams.find(t => t.id === opponentId);
-    const difficulty = isHome ? match.team_h_difficulty : match.team_a_difficulty;
+    const texts = [];
+    const difficulties = [];
+
+    matches.forEach(match => {
+      const isHome = match.team_h === team.id;
+      const opponentId = isHome ? match.team_a : match.team_h;
+      const opponent = teams.find(t => t.id === opponentId);
+      const difficulty = isHome ? match.team_h_difficulty : match.team_a_difficulty;
+
+      texts.push(`${opponent ? opponent.name : "Unknown"} (${isHome ? "H" : "A"})`);
+      difficulties.push(difficulty);
+    });
+
+    const avgDifficulty = difficulties.reduce((sum, d) => sum + d, 0) / difficulties.length;
 
     map[team.id] = {
-      difficulty,
-      opponent: opponent ? opponent.name : "Unknown",
-      homeAway: isHome ? "H" : "A",
-      text: `${opponent ? opponent.name : "Unknown"} (${isHome ? "H" : "A"})`
+      difficulty: avgDifficulty,
+      text: texts.join(" + ")
     };
   });
 
@@ -252,7 +269,7 @@ function scorePlayers(squad, fixtureMap) {
       text: "No fixture found"
     };
 
-    player.fixtureDifficulty = fixture.difficulty;
+    player.fixtureDifficulty = Number(fixture.difficulty.toFixed(1));
     player.nextFixtureText = fixture.text;
 
     const minutesReliability = Math.min(player.minutes / 2700, 1);
@@ -283,14 +300,11 @@ function scorePlayers(squad, fixtureMap) {
 }
 
 function difficultyMultiplier(difficulty) {
-  switch (difficulty) {
-    case 1: return 1.22;
-    case 2: return 1.12;
-    case 3: return 1.00;
-    case 4: return 0.90;
-    case 5: return 0.78;
-    default: return 1.00;
-  }
+  if (difficulty <= 1.5) return 1.22;
+  if (difficulty <= 2.5) return 1.12;
+  if (difficulty <= 3.5) return 1.00;
+  if (difficulty <= 4.5) return 0.90;
+  return 0.78;
 }
 
 function pickBestStartingXI(squad) {
@@ -336,9 +350,7 @@ function pickBestStartingXI(squad) {
 }
 
 function pickCaptainAndVice(startingXI) {
-  const sorted = [...startingXI].sort((a, b) => {
-    return captainScore(b) - captainScore(a);
-  });
+  const sorted = [...startingXI].sort((a, b) => captainScore(b) - captainScore(a));
 
   return {
     captain: sorted[0],
@@ -352,21 +364,16 @@ function captainScore(player) {
   if (player.position === "MID") multiplier += 0.08;
   if (player.position === "FWD") multiplier += 0.10;
   if (player.chanceOfPlaying < 100) multiplier -= 0.15;
-  if (player.fixtureDifficulty <= 2) multiplier += 0.08;
+  if (player.fixtureDifficulty <= 2.5) multiplier += 0.08;
   if (player.fixtureDifficulty >= 4) multiplier -= 0.08;
 
   return player.expectedPoints * multiplier;
 }
 
-function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, fixtureMap }) {
+function buildCandidatePool({ squad, allPlayers, teams, fixtureMap }) {
   const squadIds = new Set(squad.map(p => p.id));
-  const teamCounts = {};
 
-  squad.forEach(player => {
-    teamCounts[player.teamId] = (teamCounts[player.teamId] || 0) + 1;
-  });
-
-  const allCandidates = allPlayers
+  return allPlayers
     .filter(p => !squadIds.has(p.id))
     .map(p => {
       const team = teams.find(t => t.id === p.team);
@@ -385,7 +392,6 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, 
       const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
 
       let roleBonus = 0;
-
       if (position === "GK") {
         roleBonus = (p.clean_sheets || 0) * 0.20;
       } else if (position === "DEF") {
@@ -414,15 +420,40 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, 
         cost: p.now_cost / 10,
         expectedPoints: predicted,
         nextFixtureText: fixture.text,
-        fixtureDifficulty: fixture.difficulty
+        fixtureDifficulty: Number(fixture.difficulty.toFixed(1))
       };
     })
     .sort((a, b) => b.expectedPoints - a.expectedPoints);
+}
 
+function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, fixtureMap }) {
+  const candidatePool = buildCandidatePool({ squad, allPlayers, teams, fixtureMap });
+
+  const singleIdeas = generateSingleTransferIdeas({
+    squad,
+    candidatePool,
+    bank,
+    freeTransfers
+  });
+
+  const comboIdeas = generateDoubleTransferIdeas({
+    squad,
+    candidatePool,
+    bank,
+    freeTransfers
+  });
+
+  return [...singleIdeas, ...comboIdeas]
+    .sort((a, b) => b.netGain - a.netGain)
+    .slice(0, 8);
+}
+
+function generateSingleTransferIdeas({ squad, candidatePool, bank, freeTransfers }) {
+  const teamCounts = getTeamCounts(squad);
   const ideas = [];
 
   for (const currentPlayer of squad) {
-    const samePositionTargets = allCandidates.filter(candidate => {
+    const samePositionTargets = candidatePool.filter(candidate => {
       if (candidate.position !== currentPlayer.position) return false;
       if (candidate.cost > currentPlayer.cost + bank) return false;
 
@@ -430,20 +461,18 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, 
       const adjustedClubCount =
         candidate.teamId === currentPlayer.teamId ? currentClubCount : currentClubCount + 1;
 
-      if (adjustedClubCount > 3) return false;
-
-      return true;
+      return adjustedClubCount <= 3;
     });
 
-    for (const target of samePositionTargets.slice(0, 30)) {
+    for (const target of samePositionTargets.slice(0, 20)) {
       const gain = target.expectedPoints - currentPlayer.expectedPoints;
-      const penalty = freeTransfers >= 1 ? 0 : 4;
-      const netGain = gain - penalty;
+      const transferCost = freeTransfers >= 1 ? 0 : 4;
+      const netGain = gain - transferCost;
 
       if (netGain > 0.3) {
         ideas.push({
-          out: currentPlayer,
-          in: target,
+          type: "Single transfer",
+          moves: [{ out: currentPlayer, in: target }],
           gain,
           netGain
         });
@@ -451,9 +480,113 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank, freeTransfers, 
     }
   }
 
-  return ideas
-    .sort((a, b) => b.netGain - a.netGain)
-    .slice(0, 5);
+  return ideas;
+}
+
+function generateDoubleTransferIdeas({ squad, candidatePool, bank, freeTransfers }) {
+  const ideas = [];
+  const indexedByPosition = {
+    GK: candidatePool.filter(p => p.position === "GK").slice(0, 12),
+    DEF: candidatePool.filter(p => p.position === "DEF").slice(0, 20),
+    MID: candidatePool.filter(p => p.position === "MID").slice(0, 20),
+    FWD: candidatePool.filter(p => p.position === "FWD").slice(0, 15),
+  };
+
+  for (let i = 0; i < squad.length; i++) {
+    for (let j = i + 1; j < squad.length; j++) {
+      const out1 = squad[i];
+      const out2 = squad[j];
+
+      const pool1 = indexedByPosition[out1.position];
+      const pool2 = indexedByPosition[out2.position];
+
+      for (const in1 of pool1) {
+        if (in1.id === out1.id || in1.id === out2.id) continue;
+
+        for (const in2 of pool2) {
+          if (in2.id === in1.id) continue;
+          if (in2.id === out1.id || in2.id === out2.id) continue;
+
+          const totalOutCost = out1.cost + out2.cost;
+          const totalInCost = in1.cost + in2.cost;
+
+          if (totalInCost > totalOutCost + bank) continue;
+
+          const newSquad = squad
+            .filter(p => p.id !== out1.id && p.id !== out2.id)
+            .concat([in1, in2]);
+
+          const squadCheck = validateSquad(newSquad);
+          if (!squadCheck.valid) continue;
+
+          const gain =
+            (in1.expectedPoints + in2.expectedPoints) -
+            (out1.expectedPoints + out2.expectedPoints);
+
+          const extraTransfers = Math.max(0, 2 - freeTransfers);
+          const transferCost = extraTransfers * 4;
+          const netGain = gain - transferCost;
+
+          if (netGain > 0.5) {
+            ideas.push({
+              type: "Two-transfer combo",
+              moves: [
+                { out: out1, in: in1 },
+                { out: out2, in: in2 }
+              ],
+              gain,
+              netGain
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return dedupeComboIdeas(ideas).slice(0, 30);
+}
+
+function getTeamCounts(squad) {
+  const counts = {};
+  squad.forEach(player => {
+    counts[player.teamId] = (counts[player.teamId] || 0) + 1;
+  });
+  return counts;
+}
+
+function dedupeComboIdeas(ideas) {
+  const seen = new Set();
+  const deduped = [];
+
+  for (const idea of ideas.sort((a, b) => b.netGain - a.netGain)) {
+    const key = idea.moves
+      .map(move => `${move.out.id}->${move.in.id}`)
+      .sort()
+      .join("|");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(idea);
+    }
+  }
+
+  return deduped;
+}
+
+function renderSummary(summary) {
+  summaryOutput.innerHTML = `
+    <div class="summary-list">
+      <div class="summary-box">
+        <div class="summary-top">
+          <strong>${summary.teamName}</strong>
+          <span class="badge">GW ${summary.gameweek}</span>
+        </div>
+        <div class="player-meta">Manager: ${summary.managerName}</div>
+        <div class="player-meta">Bank: £${summary.bank.toFixed(1)}m</div>
+        <div class="player-meta">Free Transfers: ${summary.freeTransfers}</div>
+      </div>
+    </div>
+  `;
 }
 
 function renderPlayers(container, players) {
@@ -491,15 +624,11 @@ function renderCaptainSection(data) {
   captainOutput.innerHTML = `
     <div class="captain-box">
       <div><strong>Captain:</strong> ${data.captain.name} (${data.captain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">
-        ${data.captain.position} • ${data.captain.teamName} • ${data.captain.nextFixtureText}
-      </div>
+      <div class="player-meta">${data.captain.position} • ${data.captain.teamName} • ${data.captain.nextFixtureText}</div>
     </div>
     <div class="captain-box" style="margin-top: 10px;">
       <div><strong>Vice-captain:</strong> ${data.viceCaptain.name} (${data.viceCaptain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">
-        ${data.viceCaptain.position} • ${data.viceCaptain.teamName} • ${data.viceCaptain.nextFixtureText}
-      </div>
+      <div class="player-meta">${data.viceCaptain.position} • ${data.viceCaptain.teamName} • ${data.viceCaptain.nextFixtureText}</div>
     </div>
   `;
 }
@@ -514,13 +643,20 @@ function renderTransfers(ideas) {
     <div class="transfer-list">
       ${ideas.map(item => `
         <div class="transfer-item">
-          <div><strong>Out:</strong> ${item.out.name} (${item.out.teamName})</div>
-          <div><strong>In:</strong> ${item.in.name} (${item.in.teamName})</div>
+          <div class="transfer-title">${item.type}</div>
+          ${item.moves.map(move => `
+            <div><strong>Out:</strong> ${move.out.name} (${move.out.teamName})</div>
+            <div><strong>In:</strong> ${move.in.name} (${move.in.teamName})</div>
+            <div class="player-meta">
+              ${move.out.position} • Cost change: £${(move.in.cost - move.out.cost).toFixed(1)}m
+            </div>
+            <div class="player-meta">
+              In fixture: ${move.in.nextFixtureText}
+            </div>
+            <div style="height:8px;"></div>
+          `).join("")}
           <div class="player-meta">
-            ${item.out.position} • Cost change: £${(item.in.cost - item.out.cost).toFixed(1)}m
-          </div>
-          <div class="player-meta">
-            In fixture: ${item.in.nextFixtureText} • Gross gain: ${item.gain.toFixed(2)} pts • Net gain: ${item.netGain.toFixed(2)} pts
+            Gross gain: ${item.gain.toFixed(2)} pts • Net gain: ${item.netGain.toFixed(2)} pts
           </div>
         </div>
       `).join("")}
@@ -529,6 +665,7 @@ function renderTransfers(ideas) {
 }
 
 function clearOutputs() {
+  summaryOutput.innerHTML = "";
   currentSquadOutput.innerHTML = "";
   bestXiOutput.innerHTML = "";
   benchOutput.innerHTML = "";
