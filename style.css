@@ -10,7 +10,7 @@ body {
 }
 
 .app {
-  max-width: 900px;
+  max-width: 950px;
   margin: 0 auto;
   padding: 16px;
 }
@@ -82,21 +82,24 @@ button:hover {
 }
 
 .player-list,
-.transfer-list {
+.transfer-list,
+.summary-list {
   display: grid;
   gap: 10px;
 }
 
 .player-item,
 .transfer-item,
-.captain-box {
+.captain-box,
+.summary-box {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   padding: 12px;
   background: #fafafa;
 }
 
-.player-top {
+.player-top,
+.summary-top {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -112,9 +115,24 @@ button:hover {
   margin-top: 4px;
 }
 
+.transfer-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
 .empty {
   color: #6b7280;
   font-style: italic;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #e5e7eb;
+  color: #111827;
 }
 
 @media (min-width: 700px) {
