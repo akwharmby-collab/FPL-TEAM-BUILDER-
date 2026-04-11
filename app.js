@@ -41,9 +41,18 @@ async function analyseTeam() {
     setStatus("Loading FPL data...");
 
     const bootstrap = await fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/");
-    const currentEvent = bootstrap.events.find(e => e.is_current) || bootstrap.events.find(e => e.is_next) || bootstrap.events[0];
 
-    const picksData = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/event/${currentEvent.id}/picks/`);
+    const entry = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`);
+
+    if (!entry || !entry.id) {
+      throw new Error("Team not found");
+    }
+
+    const targetEventId = getBestEventId(bootstrap.events);
+
+    const picksData = await fetchJson(
+      `https://fantasy.premierleague.com/api/entry/${teamId}/event/${targetEventId}/picks/`
+    );
 
     const squad = buildSquad(picksData.picks, bootstrap);
 
@@ -53,7 +62,7 @@ async function analyseTeam() {
       return;
     }
 
-    scorePlayers(squad, currentEvent.id);
+    scorePlayers(squad);
 
     const bestTeamResult = pickBestStartingXI(squad);
     renderPlayers(bestXiOutput, bestTeamResult.startingXI);
@@ -72,18 +81,37 @@ async function analyseTeam() {
     });
 
     renderTransfers(transferIdeas);
-    setStatus("Done.");
+    setStatus(`Done. Analysed team ID ${teamId} using Gameweek ${targetEventId}.`);
   } catch (error) {
     console.error(error);
-    setStatus("Could not load FPL data. Check your team ID and try again.");
+    setStatus("Could not load your team. Check the team ID, then try again. If it still fails, the FPL API is likely being blocked in the browser.");
   }
 }
 
+function getBestEventId(events) {
+  const current = events.find(e => e.is_current);
+  if (current) return current.id;
+
+  const next = events.find(e => e.is_next);
+  if (next) return next.id;
+
+  const latestFinished = [...events]
+    .filter(e => e.finished)
+    .sort((a, b) => b.id - a.id)[0];
+
+  if (latestFinished) return latestFinished.id;
+
+  return 1;
+}
+
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const proxiedUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+  const response = await fetch(proxiedUrl);
+
   if (!response.ok) {
     throw new Error(`Fetch failed: ${url}`);
   }
+
   return response.json();
 }
 
@@ -169,21 +197,10 @@ function scorePlayers(squad) {
 }
 
 function pickBestStartingXI(squad) {
-  const gk = squad
-    .filter(p => p.position === "GK")
-    .sort((a, b) => b.expectedPoints - a.expectedPoints);
-
-  const defs = squad
-    .filter(p => p.position === "DEF")
-    .sort((a, b) => b.expectedPoints - a.expectedPoints);
-
-  const mids = squad
-    .filter(p => p.position === "MID")
-    .sort((a, b) => b.expectedPoints - a.expectedPoints);
-
-  const fwds = squad
-    .filter(p => p.position === "FWD")
-    .sort((a, b) => b.expectedPoints - a.expectedPoints);
+  const gk = squad.filter(p => p.position === "GK").sort((a, b) => b.expectedPoints - a.expectedPoints);
+  const defs = squad.filter(p => p.position === "DEF").sort((a, b) => b.expectedPoints - a.expectedPoints);
+  const mids = squad.filter(p => p.position === "MID").sort((a, b) => b.expectedPoints - a.expectedPoints);
+  const fwds = squad.filter(p => p.position === "FWD").sort((a, b) => b.expectedPoints - a.expectedPoints);
 
   let bestResult = null;
 
@@ -213,8 +230,7 @@ function pickBestStartingXI(squad) {
         formation: `1-${formation.DEF}-${formation.MID}-${formation.FWD}`,
         startingXI,
         bench,
-        totalExpected
-: total
+        totalExpected: total
       };
     }
   }
@@ -273,9 +289,8 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
       if (candidate.cost > currentPlayer.cost + bank) return false;
 
       const currentClubCount = teamCounts[candidate.teamId] || 0;
-      const adjustedClubCount = candidate.teamId === currentPlayer.teamId
-        ? currentClubCount
-        : currentClubCount + 1;
+      const adjustedClubCount =
+        candidate.teamId === currentPlayer.teamId ? currentClubCount : currentClubCount + 1;
 
       if (adjustedClubCount > 3) return false;
 
@@ -295,9 +310,7 @@ function generateTransferIdeas({ squad, allPlayers, teams, bank }) {
     }
   }
 
-  return ideas
-    .sort((a, b) => b.gain - a.gain)
-    .slice(0, 5);
+  return ideas.sort((a, b) => b.gain - a.gain).slice(0, 5);
 }
 
 function renderPlayers(container, players) {
