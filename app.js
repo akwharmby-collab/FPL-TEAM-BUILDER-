@@ -32,7 +32,10 @@ async function analyseTeam() {
   clearOutputs();
 
   const teamId = document.getElementById("teamId").value.trim();
-  const manualFreeTransfers = Math.min(5, Math.max(0, Number(document.getElementById("freeTransfers").value || 1)));
+  const manualFreeTransfers = Math.min(
+    5,
+    Math.max(0, Number(document.getElementById("freeTransfers").value || 1))
+  );
 
   if (!teamId) {
     setStatus("Please enter your FPL team ID.");
@@ -42,25 +45,27 @@ async function analyseTeam() {
   try {
     setStatus("Loading FPL data...");
 
-    const [bootstrap, fixtures] = await Promise.all([
+    const [bootstrap, fixtures, entry, history] = await Promise.all([
       fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/"),
-      fetchJson("https://fantasy.premierleague.com/api/fixtures/")
+      fetchJson("https://fantasy.premierleague.com/api/fixtures/"),
+      fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`),
+      fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/history/`)
     ]);
-
-    const entry = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`);
 
     if (!entry || !entry.id) {
       throw new Error("Team not found");
     }
 
-    const targetEventId = getBestEventId(bootstrap.events);
+    const targetEventId = getTargetEventId(bootstrap.events);
 
     const picksData = await fetchJson(
       `https://fantasy.premierleague.com/api/entry/${teamId}/event/${targetEventId}/picks/`
     );
 
-    const bankFromFpl = Number((picksData?.entry_history?.bank ?? 0) / 10);
-    bankInput.value = bankFromFpl.toFixed(1);
+    const bankFromFpl = getBankValue(picksData, history);
+    if (bankFromFpl !== null) {
+      bankInput.value = bankFromFpl.toFixed(1);
+    }
 
     const squad = buildSquad(picksData.picks, bootstrap);
 
@@ -70,7 +75,9 @@ async function analyseTeam() {
       return;
     }
 
-    const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, targetEventId);
+    const horizonEventIds = getNextEventIds(bootstrap.events, targetEventId, 3);
+    const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, horizonEventIds);
+
     scorePlayers(squad, fixtureMap);
 
     const sortedSquad = [...squad].sort((a, b) => {
@@ -86,9 +93,9 @@ async function analyseTeam() {
       managerName: entry.player_first_name && entry.player_last_name
         ? `${entry.player_first_name} ${entry.player_last_name}`
         : "Manager",
-      bank: bankFromFpl,
+      bank: bankFromFpl ?? Number(bankInput.value || 0),
       freeTransfers: manualFreeTransfers,
-      gameweek: targetEventId
+      gameweeks: horizonEventIds
     });
 
     renderPlayers(currentSquadOutput, sortedSquad);
@@ -105,21 +112,21 @@ async function analyseTeam() {
       squad,
       allPlayers: bootstrap.elements,
       teams: bootstrap.teams,
-      bank: bankFromFpl,
+      bank: bankFromFpl ?? Number(bankInput.value || 0),
       freeTransfers: manualFreeTransfers,
       fixtureMap
     });
 
     renderTransfers(transferIdeas);
 
-    setStatus(`Done. Analysed team ID ${teamId} for Gameweek ${targetEventId}.`);
+    setStatus(`Done. Analysed team ID ${teamId} across GWs ${horizonEventIds.join(", ")}.`);
   } catch (error) {
     console.error(error);
     setStatus("Could not load your team. Check the team ID and try again.");
   }
 }
 
-function getBestEventId(events) {
+function getTargetEventId(events) {
   const current = events.find(e => e.is_current);
   if (current) return current.id;
 
@@ -130,9 +137,34 @@ function getBestEventId(events) {
     .filter(e => e.finished)
     .sort((a, b) => b.id - a.id)[0];
 
-  if (latestFinished) return latestFinished.id;
+  if (latestFinished) return latestFinished.id + 1 <= 38 ? latestFinished.id + 1 : latestFinished.id;
 
   return 1;
+}
+
+function getNextEventIds(events, startEventId, count) {
+  const ids = [];
+  for (let i = startEventId; i <= 38 && ids.length < count; i++) {
+    ids.push(i);
+  }
+  return ids;
+}
+
+function getBankValue(picksData, history) {
+  const picksBank = picksData?.entry_history?.bank;
+  if (typeof picksBank === "number") {
+    return picksBank / 10;
+  }
+
+  const current = history?.current;
+  if (Array.isArray(current) && current.length > 0) {
+    const latest = [...current].sort((a, b) => b.event - a.event)[0];
+    if (typeof latest.bank === "number") {
+      return latest.bank / 10;
+    }
+  }
+
+  return null;
 }
 
 async function fetchJson(url) {
@@ -174,6 +206,8 @@ function buildSquad(picks, bootstrap) {
       chanceOfPlaying: getChanceOfPlaying(player),
       fixtureDifficulty: 3,
       nextFixtureText: "No fixture found",
+      nextFixturesText: "No fixtures found",
+      horizonExpectedPoints: 0,
       expectedPoints: 0
     };
   });
@@ -208,10 +242,7 @@ function validateSquad(squad) {
     }
   });
 
-  return {
-    valid: errors.length === 0,
-    errors
-  };
+  return { valid: errors.length === 0, errors };
 }
 
 function countByPosition(players) {
@@ -221,19 +252,22 @@ function countByPosition(players) {
   }, { GK: 0, DEF: 0, MID: 0, FWD: 0 });
 }
 
-function buildFixtureMap(fixtures, teams, targetEventId) {
+function buildFixtureMap(fixtures, teams, horizonEventIds) {
   const map = {};
-  const gwFixtures = fixtures.filter(f => f.event === targetEventId);
 
   teams.forEach(team => {
-    const matches = gwFixtures.filter(
-      f => f.team_h === team.id || f.team_a === team.id
+    const matches = fixtures.filter(f =>
+      horizonEventIds.includes(f.event) &&
+      (f.team_h === team.id || f.team_a === team.id)
     );
 
     if (matches.length === 0) {
       map[team.id] = {
-        difficulty: 3,
-        text: "No fixture found"
+        difficulties: [3],
+        texts: ["No fixture found"],
+        avgDifficulty: 3,
+        shortText: "No fixture found",
+        fullText: "No fixture found"
       };
       return;
     }
@@ -247,15 +281,18 @@ function buildFixtureMap(fixtures, teams, targetEventId) {
       const opponent = teams.find(t => t.id === opponentId);
       const difficulty = isHome ? match.team_h_difficulty : match.team_a_difficulty;
 
-      texts.push(`${opponent ? opponent.name : "Unknown"} (${isHome ? "H" : "A"})`);
+      texts.push(`GW${match.event}: ${opponent ? opponent.name : "Unknown"} (${isHome ? "H" : "A"})`);
       difficulties.push(difficulty);
     });
 
     const avgDifficulty = difficulties.reduce((sum, d) => sum + d, 0) / difficulties.length;
 
     map[team.id] = {
-      difficulty: avgDifficulty,
-      text: texts.join(" + ")
+      difficulties,
+      texts,
+      avgDifficulty,
+      shortText: texts[0],
+      fullText: texts.join(" | ")
     };
   });
 
@@ -265,19 +302,21 @@ function buildFixtureMap(fixtures, teams, targetEventId) {
 function scorePlayers(squad, fixtureMap) {
   squad.forEach(player => {
     const fixture = fixtureMap[player.teamId] || {
-      difficulty: 3,
-      text: "No fixture found"
+      avgDifficulty: 3,
+      shortText: "No fixture found",
+      fullText: "No fixtures found",
+      difficulties: [3]
     };
 
-    player.fixtureDifficulty = Number(fixture.difficulty.toFixed(1));
-    player.nextFixtureText = fixture.text;
+    player.fixtureDifficulty = Number(fixture.avgDifficulty.toFixed(1));
+    player.nextFixtureText = fixture.shortText;
+    player.nextFixturesText = fixture.fullText;
 
     const minutesReliability = Math.min(player.minutes / 2700, 1);
     const availabilityFactor = player.chanceOfPlaying / 100;
-    const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
+    const fixtureMultiplier = difficultyMultiplier(fixture.avgDifficulty);
 
     let roleBonus = 0;
-
     if (player.position === "GK") {
       roleBonus = player.cleanSheets * 0.20;
     } else if (player.position === "DEF") {
@@ -288,14 +327,15 @@ function scorePlayers(squad, fixtureMap) {
       roleBonus = (player.expectedGoals * 1.20) + (player.expectedAssists * 0.70);
     }
 
-    player.expectedPoints =
-      (
-        (player.form * 0.32) +
-        (player.pointsPerGame * 0.20) +
-        (minutesReliability * 2.2) +
-        (player.ictIndex * 0.035) +
-        roleBonus
-      ) * fixtureMultiplier * availabilityFactor;
+    const baseScore =
+      (player.form * 0.32) +
+      (player.pointsPerGame * 0.20) +
+      (minutesReliability * 2.2) +
+      (player.ictIndex * 0.035) +
+      roleBonus;
+
+    player.horizonExpectedPoints = baseScore * fixtureMultiplier * availabilityFactor;
+    player.expectedPoints = player.horizonExpectedPoints;
   });
 }
 
@@ -351,7 +391,6 @@ function pickBestStartingXI(squad) {
 
 function pickCaptainAndVice(startingXI) {
   const sorted = [...startingXI].sort((a, b) => captainScore(b) - captainScore(a));
-
   return {
     captain: sorted[0],
     viceCaptain: sorted[1]
@@ -360,13 +399,11 @@ function pickCaptainAndVice(startingXI) {
 
 function captainScore(player) {
   let multiplier = 1;
-
   if (player.position === "MID") multiplier += 0.08;
   if (player.position === "FWD") multiplier += 0.10;
   if (player.chanceOfPlaying < 100) multiplier -= 0.15;
   if (player.fixtureDifficulty <= 2.5) multiplier += 0.08;
   if (player.fixtureDifficulty >= 4) multiplier -= 0.08;
-
   return player.expectedPoints * multiplier;
 }
 
@@ -379,8 +416,9 @@ function buildCandidatePool({ squad, allPlayers, teams, fixtureMap }) {
       const team = teams.find(t => t.id === p.team);
       const position = POSITION_MAP[p.element_type];
       const fixture = fixtureMap[p.team] || {
-        difficulty: 3,
-        text: "No fixture found"
+        avgDifficulty: 3,
+        shortText: "No fixture found",
+        fullText: "No fixtures found"
       };
 
       const minutesReliability = Math.min((p.minutes || 0) / 2700, 1);
@@ -389,7 +427,7 @@ function buildCandidatePool({ squad, allPlayers, teams, fixtureMap }) {
           ? 1
           : Number(p.chance_of_playing_next_round) / 100
       );
-      const fixtureMultiplier = difficultyMultiplier(fixture.difficulty);
+      const fixtureMultiplier = difficultyMultiplier(fixture.avgDifficulty);
 
       let roleBonus = 0;
       if (position === "GK") {
@@ -419,8 +457,9 @@ function buildCandidatePool({ squad, allPlayers, teams, fixtureMap }) {
         position,
         cost: p.now_cost / 10,
         expectedPoints: predicted,
-        nextFixtureText: fixture.text,
-        fixtureDifficulty: Number(fixture.difficulty.toFixed(1))
+        nextFixtureText: fixture.shortText,
+        nextFixturesText: fixture.fullText,
+        fixtureDifficulty: Number(fixture.avgDifficulty.toFixed(1))
       };
     })
     .sort((a, b) => b.expectedPoints - a.expectedPoints);
@@ -579,7 +618,7 @@ function renderSummary(summary) {
       <div class="summary-box">
         <div class="summary-top">
           <strong>${summary.teamName}</strong>
-          <span class="badge">GW ${summary.gameweek}</span>
+          <span class="badge">GWs ${summary.gameweeks.join(", ")}</span>
         </div>
         <div class="player-meta">Manager: ${summary.managerName}</div>
         <div class="player-meta">Bank: £${summary.bank.toFixed(1)}m</div>
@@ -607,7 +646,7 @@ function renderPlayers(container, players) {
             ${player.position} • ${player.teamName} • £${player.cost.toFixed(1)}m
           </div>
           <div class="player-meta">
-            Next fixture: ${player.nextFixtureText} • Difficulty: ${player.fixtureDifficulty}
+            Fixtures: ${player.nextFixturesText} • Avg difficulty: ${player.fixtureDifficulty}
           </div>
         </div>
       `).join("")}
@@ -624,11 +663,11 @@ function renderCaptainSection(data) {
   captainOutput.innerHTML = `
     <div class="captain-box">
       <div><strong>Captain:</strong> ${data.captain.name} (${data.captain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">${data.captain.position} • ${data.captain.teamName} • ${data.captain.nextFixtureText}</div>
+      <div class="player-meta">${data.captain.position} • ${data.captain.teamName} • ${data.captain.nextFixturesText}</div>
     </div>
     <div class="captain-box" style="margin-top: 10px;">
       <div><strong>Vice-captain:</strong> ${data.viceCaptain.name} (${data.viceCaptain.expectedPoints.toFixed(2)} pts)</div>
-      <div class="player-meta">${data.viceCaptain.position} • ${data.viceCaptain.teamName} • ${data.viceCaptain.nextFixtureText}</div>
+      <div class="player-meta">${data.viceCaptain.position} • ${data.viceCaptain.teamName} • ${data.viceCaptain.nextFixturesText}</div>
     </div>
   `;
 }
@@ -651,7 +690,7 @@ function renderTransfers(ideas) {
               ${move.out.position} • Cost change: £${(move.in.cost - move.out.cost).toFixed(1)}m
             </div>
             <div class="player-meta">
-              In fixture: ${move.in.nextFixtureText}
+              In fixtures: ${move.in.nextFixturesText}
             </div>
             <div style="height:8px;"></div>
           `).join("")}
