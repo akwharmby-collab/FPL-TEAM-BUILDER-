@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPL Team Helper</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>FPL Team Helper</h1>
+      <p>Best XI, captain, vice-captain, and transfer ideas</p>
+    </header>
+
+    <section class="card">
+      <h2>Team Input</h2>
+
+      <div class="form-grid">
+        <label>
+          Team ID
+          <input type="number" id="teamId" placeholder="e.g. 1234567" />
+        </label>
+
+        <label>
+          Money in Bank (£m)
+          <input type="number" id="bank" step="0.1" min="0" placeholder="e.g. 1.5" />
+        </label>
+
+        <label>
+          Free Transfers
+          <input type="number" id="freeTransfers" min="0" max="5" value="1" />
+        </label>
+      </div>
+
+      <button id="analyseBtn">Analyse Team</button>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Recommended Best XI</h2>
+      <div id="formationOutput" class="small-note"></div>
+      <div id="bestXiOutput"></div>
+    </section>
+
+    <section class="card">
+      <h2>Bench Order</h2>
+      <div id="benchOutput"></div>
+    </section>
+
+    <section class="card">
+      <h2>Captain Picks</h2>
+      <div id="captainOutput"></div>
+    </section>
+
+    <section class="card">
+      <h2>Top 5 Transfer Ideas</h2>
+      <div id="transferOutput"></div>
+      <p class="small-note">
+        First version uses a simple points model and one-for-one legal transfer checks.
+      </p>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
