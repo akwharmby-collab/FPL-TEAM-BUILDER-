@@ -10,7 +10,7 @@ body {
 }
 
 .app {
-  max-width: 950px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 16px;
 }
@@ -51,10 +51,10 @@ input {
   border: 1px solid #d1d5db;
   border-radius: 10px;
   font-size: 16px;
+  background: #fff;
 }
 
 button {
-  width: 100%;
   border: none;
   border-radius: 10px;
   padding: 14px;
@@ -67,6 +67,44 @@ button {
 
 button:hover {
   opacity: 0.95;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.secondary-btn {
+  background: #4b5563;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.tab-btn {
+  white-space: nowrap;
+  background: #e5e7eb;
+  color: #111827;
+  padding: 10px 14px;
+}
+
+.tab-btn.active {
+  background: #111827;
+  color: #ffffff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
 }
 
 .status {
@@ -83,7 +121,9 @@ button:hover {
 
 .player-list,
 .transfer-list,
-.summary-list {
+.summary-list,
+.chips-list,
+.sell-list {
   display: grid;
   gap: 10px;
 }
@@ -91,7 +131,9 @@ button:hover {
 .player-item,
 .transfer-item,
 .captain-box,
-.summary-box {
+.summary-box,
+.chip-box,
+.sell-item {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   padding: 12px;
@@ -99,30 +141,25 @@ button:hover {
 }
 
 .player-top,
-.summary-top {
+.summary-top,
+.sell-top {
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
 
-.player-name {
+.player-name,
+.transfer-title,
+.sell-name {
   font-weight: 700;
 }
 
-.player-meta {
+.player-meta,
+.transfer-meta,
+.chip-meta {
   font-size: 13px;
   color: #6b7280;
   margin-top: 4px;
-}
-
-.transfer-title {
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.empty {
-  color: #6b7280;
-  font-style: italic;
 }
 
 .badge {
@@ -135,13 +172,25 @@ button:hover {
   color: #111827;
 }
 
+.empty {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.sell-grid {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 10px;
+  align-items: center;
+}
+
+.chip-score {
+  font-weight: 700;
+  margin-top: 4px;
+}
+
 @media (min-width: 700px) {
   .form-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  button {
-    width: auto;
-    min-width: 220px;
+    grid-template-columns: repeat(4, 1fr);
   }
 }
