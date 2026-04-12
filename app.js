@@ -175,7 +175,6 @@ async function analyseTeam() {
     });
 
     renderPlayers(currentSquadOutput, sortedSquad);
-
     renderSellValueEditor(teamId, sortedSquad);
 
     const bestTeamResult = pickBestStartingXI(squad);
@@ -732,23 +731,27 @@ function dedupeComboIdeas(ideas) {
 
 function generateChipSuggestions({ squad, bestTeamResult, captainData, transferIdeas, horizonEventIds }) {
   const allLikelyStarters = squad.filter(p => p.chanceOfPlaying >= 75).length;
-  const benchStrength = bestTeamResult.bench.reduce((sum, p) => sum + p.expectedPoints, 0);
+  const benchStrength = bestTeamResult?.bench?.reduce((sum, p) => sum + (p.expectedPoints || 0), 0) || 0;
   const flaggedPlayers = squad.filter(p => p.chanceOfPlaying < 75).length;
-  const avgDifficulty = squad.reduce((sum, p) => sum + p.fixtureDifficulty, 0) / squad.length;
+  const avgDifficulty = squad.length
+    ? squad.reduce((sum, p) => sum + (p.fixtureDifficulty || 3), 0) / squad.length
+    : 3;
   const bestTransferNet = transferIdeas.length ? transferIdeas[0].netGain : 0;
-  const captainProjection = captainScore(captainData.captain);
+  const captainProjection = captainData?.captain ? captainScore(captainData.captain) : 0;
 
   const suggestions = [];
 
   let tcScore = 0;
   if (captainProjection >= 9) tcScore += 3;
-  if (captainData.captain.fixtureDifficulty <= 2.5) tcScore += 2;
-  if (captainData.captain.chanceOfPlaying === 100) tcScore += 1;
+  if (captainData?.captain?.fixtureDifficulty <= 2.5) tcScore += 2;
+  if (captainData?.captain?.chanceOfPlaying === 100) tcScore += 1;
   suggestions.push({
     chip: "Triple Captain",
     score: tcScore,
-    verdict: tcScore >= 5 ? "Strong option" : tcScore >= 3 ? "Possible option" : "Probably hold",
-    reason: `Best captain is ${captainData.captain.name} with a strong projected return and fixtures across GWs ${horizonEventIds.join(", ")}.`
+    verdict: getChipVerdict(tcScore),
+    reason: captainData?.captain
+      ? `Best captain is ${captainData.captain.name} with projected upside across GWs ${horizonEventIds.join(", ")}.`
+      : "No standout captain signal yet."
   });
 
   let bbScore = 0;
@@ -758,19 +761,19 @@ function generateChipSuggestions({ squad, bestTeamResult, captainData, transferI
   suggestions.push({
     chip: "Bench Boost",
     score: bbScore,
-    verdict: bbScore >= 5 ? "Strong option" : bbScore >= 3 ? "Possible option" : "Probably hold",
+    verdict: getChipVerdict(bbScore),
     reason: `Bench projection is ${benchStrength.toFixed(2)} points and ${allLikelyStarters}/15 players look available.`
   });
 
   let fhScore = 0;
   if (avgDifficulty >= 3.7) fhScore += 2;
   if (flaggedPlayers >= 3) fhScore += 2;
-  if (bestTeamResult.totalExpected < 42) fhScore += 2;
+  if ((bestTeamResult?.totalExpected || 0) < 42) fhScore += 2;
   suggestions.push({
     chip: "Free Hit",
     score: fhScore,
-    verdict: fhScore >= 5 ? "Strong option" : fhScore >= 3 ? "Possible option" : "Probably hold",
-    reason: `Use if this squad looks weak only for the short term: average fixture difficulty is ${avgDifficulty.toFixed(1)} and ${flaggedPlayers} players are flagged or doubtful.`
+    verdict: getChipVerdict(fhScore),
+    reason: `Short-term squad pressure looks ${avgDifficulty >= 3.7 || flaggedPlayers >= 3 ? "high" : "manageable"} with average fixture difficulty ${avgDifficulty.toFixed(1)} and ${flaggedPlayers} flagged players.`
   });
 
   let wcScore = 0;
@@ -781,11 +784,17 @@ function generateChipSuggestions({ squad, bestTeamResult, captainData, transferI
   suggestions.push({
     chip: "Wildcard",
     score: wcScore,
-    verdict: wcScore >= 5 ? "Strong option" : wcScore >= 3 ? "Possible option" : "Probably hold",
-    reason: `Best used when multiple transfers are needed together. Current top transfer-plan net gain is ${bestTransferNet.toFixed(2)} points.`
+    verdict: getChipVerdict(wcScore),
+    reason: `Best when several changes are needed together. Current top transfer-plan net gain is ${bestTransferNet.toFixed(2)} points.`
   });
 
   return suggestions.sort((a, b) => b.score - a.score);
+}
+
+function getChipVerdict(score) {
+  if (score >= 5) return "Strong option";
+  if (score >= 3) return "Possible option";
+  return "Probably hold";
 }
 
 function renderSummary(summary) {
@@ -930,8 +939,17 @@ function renderSellValueEditor(teamId, squad) {
 }
 
 function renderChips(chips) {
+  if (!chipsOutput) return;
+
   if (!chips || chips.length === 0) {
-    chipsOutput.innerHTML = `<p class="empty">No chip suggestions available.</p>`;
+    chipsOutput.innerHTML = `
+      <div class="chips-list">
+        <div class="chip-box">
+          <div class="player-name">No chip suggestions available yet.</div>
+          <div class="chip-meta">Try analysing the team again after the squad and fixtures load.</div>
+        </div>
+      </div>
+    `;
     return;
   }
 
