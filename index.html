@@ -10,7 +10,7 @@
   <div class="app">
     <header class="app-header">
       <h1>FPL Team Helper</h1>
-      <p>Best XI, captain, vice-captain, bank, and transfer ideas</p>
+      <p>5-gameweek planning, captaincy, transfers, sell values, and chip ideas</p>
     </header>
 
     <section class="card">
@@ -31,44 +31,87 @@
           Free Transfers
           <input type="number" id="freeTransfers" min="0" max="5" value="1" />
         </label>
+
+        <label>
+          Planning Horizon (GWs)
+          <input type="number" id="planGws" min="1" max="5" value="5" />
+        </label>
       </div>
 
-      <button id="analyseBtn">Analyse Team</button>
+      <div class="button-row">
+        <button id="analyseBtn">Analyse Team</button>
+        <button id="saveSettingsBtn" class="secondary-btn" type="button">Save Settings</button>
+      </div>
+
       <p id="status" class="status"></p>
     </section>
 
-    <section class="card">
-      <h2>FPL Summary</h2>
-      <div id="summaryOutput"></div>
+    <section class="tabs">
+      <button class="tab-btn active" data-tab="summaryTab">Summary</button>
+      <button class="tab-btn" data-tab="squadTab">Squad</button>
+      <button class="tab-btn" data-tab="lineupTab">Best XI</button>
+      <button class="tab-btn" data-tab="transfersTab">Transfers</button>
+      <button class="tab-btn" data-tab="sellValuesTab">Sell Values</button>
+      <button class="tab-btn" data-tab="chipsTab">Chips</button>
     </section>
 
-    <section class="card">
-      <h2>Current Squad</h2>
-      <div id="currentSquadOutput"></div>
+    <section id="summaryTab" class="tab-panel active">
+      <div class="card">
+        <h2>FPL Summary</h2>
+        <div id="summaryOutput"></div>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Recommended Best XI</h2>
-      <div id="formationOutput" class="small-note"></div>
-      <div id="bestXiOutput"></div>
+    <section id="squadTab" class="tab-panel">
+      <div class="card">
+        <h2>Current Squad</h2>
+        <div id="currentSquadOutput"></div>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Bench Order</h2>
-      <div id="benchOutput"></div>
+    <section id="lineupTab" class="tab-panel">
+      <div class="card">
+        <h2>Recommended Best XI</h2>
+        <div id="formationOutput" class="small-note"></div>
+        <div id="bestXiOutput"></div>
+      </div>
+
+      <div class="card">
+        <h2>Bench Order</h2>
+        <div id="benchOutput"></div>
+      </div>
+
+      <div class="card">
+        <h2>Captain Picks</h2>
+        <div id="captainOutput"></div>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Captain Picks</h2>
-      <div id="captainOutput"></div>
+    <section id="transfersTab" class="tab-panel">
+      <div class="card">
+        <h2>Top Transfer Ideas</h2>
+        <div id="transferOutput"></div>
+        <p class="small-note">
+          Transfer gains use your saved sell values when available. If not, they fall back to current player price.
+        </p>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Top Transfer Ideas</h2>
-      <div id="transferOutput"></div>
-      <p class="small-note">
-        Includes the best single-transfer ideas and the best two-transfer combo ideas.
-      </p>
+    <section id="sellValuesTab" class="tab-panel">
+      <div class="card">
+        <h2>Sell Values</h2>
+        <p class="small-note">
+          Enter the actual selling price you would receive for each player. These are saved locally on your device/browser.
+        </p>
+        <div id="sellValuesOutput"></div>
+      </div>
+    </section>
+
+    <section id="chipsTab" class="tab-panel">
+      <div class="card">
+        <h2>Chip Suggestions</h2>
+        <div id="chipsOutput"></div>
+      </div>
     </section>
   </div>
 
