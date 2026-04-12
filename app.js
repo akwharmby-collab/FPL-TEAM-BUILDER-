@@ -32,33 +32,44 @@ const formationOutput = document.getElementById("formationOutput");
 
 const tabButtons = document.querySelectorAll(".tab-btn");
 
-let latestSquad = [];
-let latestTeamId = "";
-let latestBank = 0;
-
 setupTabs();
 loadSavedSettings();
 
-analyseBtn.addEventListener("click", analyseTeam);
-saveSettingsBtn.addEventListener("click", saveSettings);
+if (analyseBtn) {
+  analyseBtn.addEventListener("click", analyseTeam);
+}
+
+if (saveSettingsBtn) {
+  saveSettingsBtn.addEventListener("click", saveSettings);
+}
 
 function setupTabs() {
+  if (!tabButtons.length) return;
+
   tabButtons.forEach(button => {
     button.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
 
       button.classList.add("active");
-      document.getElementById(button.dataset.tab).classList.add("active");
+
+      const panel = document.getElementById(button.dataset.tab);
+      if (panel) {
+        panel.classList.add("active");
+      }
     });
   });
 }
 
 function saveSettings() {
+  const teamIdEl = document.getElementById("teamId");
+  const freeTransfersEl = document.getElementById("freeTransfers");
+  const planGwsEl = document.getElementById("planGws");
+
   const settings = {
-    teamId: document.getElementById("teamId").value.trim(),
-    freeTransfers: document.getElementById("freeTransfers").value,
-    planGws: document.getElementById("planGws").value
+    teamId: teamIdEl ? teamIdEl.value.trim() : "",
+    freeTransfers: freeTransfersEl ? freeTransfersEl.value : "1",
+    planGws: planGwsEl ? planGwsEl.value : "5"
   };
 
   localStorage.setItem("fpl_helper_settings", JSON.stringify(settings));
@@ -71,9 +82,14 @@ function loadSavedSettings() {
 
   try {
     const settings = JSON.parse(raw);
-    if (settings.teamId) document.getElementById("teamId").value = settings.teamId;
-    if (settings.freeTransfers) document.getElementById("freeTransfers").value = settings.freeTransfers;
-    if (settings.planGws) document.getElementById("planGws").value = settings.planGws;
+
+    const teamIdEl = document.getElementById("teamId");
+    const freeTransfersEl = document.getElementById("freeTransfers");
+    const planGwsEl = document.getElementById("planGws");
+
+    if (teamIdEl && settings.teamId) teamIdEl.value = settings.teamId;
+    if (freeTransfersEl && settings.freeTransfers) freeTransfersEl.value = settings.freeTransfers;
+    if (planGwsEl && settings.planGws) planGwsEl.value = settings.planGws;
   } catch (error) {
     console.error(error);
   }
@@ -111,8 +127,6 @@ async function analyseTeam() {
     return;
   }
 
-  latestTeamId = teamId;
-
   try {
     setStatus("Loading FPL data...");
 
@@ -134,19 +148,19 @@ async function analyseTeam() {
     );
 
     const bankFromFpl = getBankValue(picksData, history, targetEventId);
-    latestBank = bankFromFpl ?? 0;
 
-    if (bankFromFpl !== null) {
-      bankInput.value = bankFromFpl.toFixed(1);
-    } else {
-      bankInput.value = "";
+    if (bankInput) {
+      if (bankFromFpl !== null) {
+        bankInput.value = bankFromFpl.toFixed(1);
+      } else {
+        bankInput.value = "";
+      }
     }
 
     const horizonEventIds = getNextEventIds(bootstrap.events, targetEventId, planGws);
     const fixtureMap = buildFixtureMap(fixtures, bootstrap.teams, horizonEventIds);
 
     const squad = buildSquad(picksData.picks, bootstrap);
-    latestSquad = squad;
 
     const squadCheck = validateSquad(squad);
     if (!squadCheck.valid) {
@@ -179,7 +193,11 @@ async function analyseTeam() {
 
     const bestTeamResult = pickBestStartingXI(squad);
     renderPlayers(bestXiOutput, bestTeamResult.startingXI);
-    formationOutput.textContent = `Recommended formation: ${bestTeamResult.formation}`;
+
+    if (formationOutput) {
+      formationOutput.textContent = `Recommended formation: ${bestTeamResult.formation}`;
+    }
+
     renderPlayers(benchOutput, bestTeamResult.bench);
 
     const captainData = pickCaptainAndVice(bestTeamResult.startingXI);
@@ -798,6 +816,8 @@ function getChipVerdict(score) {
 }
 
 function renderSummary(summary) {
+  if (!summaryOutput) return;
+
   const bankText = summary.bank === null
     ? "Unavailable from public data"
     : `£${summary.bank.toFixed(1)}m`;
@@ -818,6 +838,8 @@ function renderSummary(summary) {
 }
 
 function renderPlayers(container, players) {
+  if (!container) return;
+
   if (!players || players.length === 0) {
     container.innerHTML = `<p class="empty">No data available.</p>`;
     return;
@@ -844,6 +866,8 @@ function renderPlayers(container, players) {
 }
 
 function renderCaptainSection(data) {
+  if (!captainOutput) return;
+
   if (!data?.captain || !data?.viceCaptain) {
     captainOutput.innerHTML = `<p class="empty">No captain data available.</p>`;
     return;
@@ -862,6 +886,8 @@ function renderCaptainSection(data) {
 }
 
 function renderTransfers(ideas) {
+  if (!transferOutput) return;
+
   if (!ideas || ideas.length === 0) {
     transferOutput.innerHTML = `<p class="empty">No strong transfer ideas found yet.</p>`;
     return;
@@ -893,6 +919,8 @@ function renderTransfers(ideas) {
 }
 
 function renderSellValueEditor(teamId, squad) {
+  if (!sellValuesOutput) return;
+
   const overrides = loadSellValueOverrides(teamId);
 
   sellValuesOutput.innerHTML = `
@@ -970,18 +998,20 @@ function renderChips(chips) {
 }
 
 function clearOutputs() {
-  summaryOutput.innerHTML = "";
-  currentSquadOutput.innerHTML = "";
-  bestXiOutput.innerHTML = "";
-  benchOutput.innerHTML = "";
-  captainOutput.innerHTML = "";
-  transferOutput.innerHTML = "";
-  sellValuesOutput.innerHTML = "";
-  chipsOutput.innerHTML = "";
-  formationOutput.textContent = "";
-  statusEl.textContent = "";
+  if (summaryOutput) summaryOutput.innerHTML = "";
+  if (currentSquadOutput) currentSquadOutput.innerHTML = "";
+  if (bestXiOutput) bestXiOutput.innerHTML = "";
+  if (benchOutput) benchOutput.innerHTML = "";
+  if (captainOutput) captainOutput.innerHTML = "";
+  if (transferOutput) transferOutput.innerHTML = "";
+  if (sellValuesOutput) sellValuesOutput.innerHTML = "";
+  if (chipsOutput) chipsOutput.innerHTML = "";
+  if (formationOutput) formationOutput.textContent = "";
+  if (statusEl) statusEl.textContent = "";
 }
 
 function setStatus(message) {
-  statusEl.textContent = message;
+  if (statusEl) {
+    statusEl.textContent = message;
+  }
 }
