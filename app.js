@@ -128,7 +128,7 @@ async function analyseTeam() {
   }
 
   try {
-    setStatus("Loading FPL data...");
+    setStatus("Loading latest FPL data...");
 
     const [bootstrap, fixtures, entry, history] = await Promise.all([
       fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/"),
@@ -185,7 +185,8 @@ async function analyseTeam() {
         : "Manager",
       bank: bankFromFpl,
       freeTransfers,
-      gameweeks: horizonEventIds
+      gameweeks: horizonEventIds,
+      loadedGw: targetEventId
     });
 
     renderPlayers(currentSquadOutput, sortedSquad);
@@ -231,7 +232,7 @@ async function analyseTeam() {
       ? " Bank could not be read automatically."
       : ` Bank auto-filled: £${bankFromFpl.toFixed(1)}m.`;
 
-    setStatus(`Done. Analysed team ID ${teamId} across GWs ${horizonEventIds.join(", ")}.${bankMessage}`);
+    setStatus(`Done. Loaded squad from GW ${targetEventId} and planned across GWs ${horizonEventIds.join(", ")}.${bankMessage}`);
   } catch (error) {
     console.error(error);
     setStatus("Could not load your team. Check the team ID and try again.");
@@ -239,8 +240,13 @@ async function analyseTeam() {
 }
 
 async function fetchJson(url) {
-  const proxiedUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
-  const response = await fetch(proxiedUrl);
+  const bust = `_=${Date.now()}`;
+  const withBust = url.includes("?") ? `${url}&${bust}` : `${url}?${bust}`;
+  const proxiedUrl = `https://corsproxy.io/?url=${encodeURIComponent(withBust)}`;
+
+  const response = await fetch(proxiedUrl, {
+    cache: "no-store"
+  });
 
   if (!response.ok) {
     throw new Error(`Fetch failed: ${url}`);
@@ -250,11 +256,11 @@ async function fetchJson(url) {
 }
 
 function getTargetEventId(events) {
-  const current = events.find(e => e.is_current);
-  if (current) return current.id;
-
   const next = events.find(e => e.is_next);
   if (next) return next.id;
+
+  const current = events.find(e => e.is_current);
+  if (current) return current.id;
 
   const latestFinished = [...events]
     .filter(e => e.finished)
@@ -827,11 +833,12 @@ function renderSummary(summary) {
       <div class="summary-box">
         <div class="summary-top">
           <strong>${summary.teamName}</strong>
-          <span class="badge">GWs ${summary.gameweeks.join(", ")}</span>
+          <span class="badge">Loaded GW ${summary.loadedGw}</span>
         </div>
         <div class="player-meta">Manager: ${summary.managerName}</div>
         <div class="player-meta">Bank: ${bankText}</div>
         <div class="player-meta">Free Transfers: ${summary.freeTransfers}</div>
+        <div class="player-meta">Planning horizon: GWs ${summary.gameweeks.join(", ")}</div>
       </div>
     </div>
   `;
