@@ -128,21 +128,25 @@ async function analyseTeam() {
   }
 
   try {
-    setStatus("Loading latest FPL data...");
+    setStatus("Loading bootstrap...");
+    const bootstrap = await fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/");
 
-    const [bootstrap, fixtures, entry, history] = await Promise.all([
-      fetchJson("https://fantasy.premierleague.com/api/bootstrap-static/"),
-      fetchJson("https://fantasy.premierleague.com/api/fixtures/"),
-      fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`),
-      fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/history/`)
-    ]);
+    setStatus("Loading fixtures...");
+    const fixtures = await fetchJson("https://fantasy.premierleague.com/api/fixtures/");
+
+    setStatus("Loading entry...");
+    const entry = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/`);
 
     if (!entry || !entry.id) {
-      throw new Error("Team not found");
+      throw new Error("Entry lookup returned no team.");
     }
+
+    setStatus("Loading history...");
+    const history = await fetchJson(`https://fantasy.premierleague.com/api/entry/${teamId}/history/`);
 
     const targetEventId = getTargetEventId(bootstrap.events);
 
+    setStatus(`Loading picks for GW ${targetEventId}...`);
     const picksData = await fetchJson(
       `https://fantasy.premierleague.com/api/entry/${teamId}/event/${targetEventId}/picks/`
     );
@@ -228,14 +232,10 @@ async function analyseTeam() {
 
     renderChips(chipSuggestions);
 
-    const bankMessage = bankFromFpl === null
-      ? " Bank could not be read automatically."
-      : ` Bank auto-filled: £${bankFromFpl.toFixed(1)}m.`;
-
-    setStatus(`Done. Loaded squad from GW ${targetEventId} and planned across GWs ${horizonEventIds.join(", ")}.${bankMessage}`);
+    setStatus(`Done. Loaded GW ${targetEventId}.`);
   } catch (error) {
     console.error(error);
-    setStatus("Could not load your team. Check the team ID and try again.");
+    setStatus(`Load failed: ${error.message}`);
   }
 }
 
@@ -249,7 +249,7 @@ async function fetchJson(url) {
   });
 
   if (!response.ok) {
-    throw new Error(`Fetch failed: ${url}`);
+    throw new Error(`Request failed (${response.status}) for ${url}`);
   }
 
   return response.json();
@@ -521,13 +521,11 @@ function pickCaptainAndVice(startingXI) {
 
 function captainScore(player) {
   let multiplier = 1;
-
   if (player.position === "MID") multiplier += 0.08;
   if (player.position === "FWD") multiplier += 0.10;
   if (player.chanceOfPlaying < 100) multiplier -= 0.15;
   if (player.fixtureDifficulty <= 2.5) multiplier += 0.08;
   if (player.fixtureDifficulty >= 4) multiplier -= 0.08;
-
   return player.expectedPoints * multiplier;
 }
 
